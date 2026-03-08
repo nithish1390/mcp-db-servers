@@ -1,0 +1,14 @@
+{
+  "servers": {
+    "db-server": {
+      "type": "stdio",
+      "command": "/usr/local/bin/python3",
+      "args": ["server.py"]
+    },
+    "java-db-server": {
+      "type": "stdio",
+      "command": "java",
+      "args": ["-cp", "/Users/nithish/project/ai1/java-db-server/target/classes", "com.example.McpDbServer"]
+    }
+  }
+}

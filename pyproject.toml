@@ -1,0 +1,11 @@
+[project]
+name = "mcp-db-server"
+version = "0.1.0"
+description = "MCP server for database operations"
+dependencies = [
+    "mcp[cli]"
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
