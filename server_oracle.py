@@ -140,9 +140,29 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
 mcp = FastMCP("Oracle DB Server", lifespan=app_lifespan)
 
 
+def _validate_select_query(query: str) -> Optional[str]:
+    """Validate that the query is a SELECT (or WITH) statement.
+
+    Returns:
+        None if valid, otherwise an error message.
+    """
+    if not query or not isinstance(query, str):
+        return "Error: Query must be a non-empty string."
+
+    normalized = query.strip().lower()
+    if not (normalized.startswith("select") or normalized.startswith("with")):
+        return "Error: Only SELECT queries are allowed. DDL/DML statements (INSERT/UPDATE/DELETE/CREATE) are not permitted."
+
+    return None
+
+
 @mcp.tool()
 def query_db(query: str, ctx: Context) -> str:
     """Execute a SELECT query on the Oracle database and return results."""
+    validation_error = _validate_select_query(query)
+    if validation_error:
+        return validation_error
+
     db = ctx.request_context.lifespan_context.db
     cursor = db.cursor()
     try:
@@ -171,16 +191,12 @@ def query_db(query: str, ctx: Context) -> str:
 
 @mcp.tool()
 def execute_db(query: str, ctx: Context) -> str:
-    """Execute an INSERT, UPDATE, or DELETE query on the Oracle database."""
-    db = ctx.request_context.lifespan_context.db
-    cursor = db.cursor()
-    try:
-        cursor.execute(query)
-        db.commit()
-        return f"Query executed successfully. Rows affected: {cursor.rowcount}"
-    except Exception as e:
-        return f"Error executing query: {e}"
+    """Reject non-SELECT queries; only SELECT is allowed."""
+    validation_error = _validate_select_query(query)
+    if validation_error:
+        return validation_error
 
+    return "Error: This server only supports SELECT queries. Use 'query_db' for SELECT statements."
 
 @mcp.tool()
 def get_driver_info(ctx: Context) -> str:
