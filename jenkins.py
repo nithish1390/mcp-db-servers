@@ -17,7 +17,6 @@ Example usage (via MCP tool call):
 }
 """
 
-import os
 from typing import Any, Dict, Optional
 
 import requests
@@ -25,21 +24,30 @@ import requests
 from mcp.server.fastmcp import Context, FastMCP
 
 
+# Hard-coded Jenkins configuration (replace with your actual values)
+JENKINS_URL = "https://jenkins.example.com"
+JENKINS_USER = "your-username"
+JENKINS_TOKEN = "your-token"
+
+# Allowed jobs list (only these jobs may be triggered)
+ALLOWED_JOBS = {
+    "my-job",
+    "another-job"
+}
+
+
 def _get_jenkins_auth() -> Optional[tuple[str, str]]:
-    """Get Jenkins auth credentials from environment."""
-    user = os.environ.get("JENKINS_USER")
-    token = os.environ.get("JENKINS_TOKEN")
-    if user and token:
-        return (user, token)
+    """Get Jenkins auth credentials from hard-coded configuration."""
+    if JENKINS_USER and JENKINS_TOKEN:
+        return (JENKINS_USER, JENKINS_TOKEN)
     return None
 
 
 def _get_jenkins_url() -> str:
-    """Get Jenkins base URL from environment."""
-    url = os.environ.get("JENKINS_URL")
-    if not url:
-        raise ValueError("JENKINS_URL environment variable is not set")
-    return url.rstrip("/")
+    """Get Jenkins base URL from hard-coded configuration."""
+    if not JENKINS_URL:
+        raise ValueError("JENKINS_URL is not configured")
+    return JENKINS_URL.rstrip("/")
 
 
 def _get_crumb(session: requests.Session, base_url: str, auth: Optional[tuple[str, str]]) -> Dict[str, str]:
@@ -53,6 +61,9 @@ def _get_crumb(session: requests.Session, base_url: str, auth: Optional[tuple[st
 
 def trigger_jenkins_job(job_name: str, parameters: Optional[Dict[str, Any]] = None) -> str:
     """Trigger a Jenkins job and return the queue URL."""
+    if job_name not in ALLOWED_JOBS:
+        raise ValueError(f"Job '{job_name}' is not allowed. Allowed jobs: {sorted(ALLOWED_JOBS)}")
+
     base_url = _get_jenkins_url()
     auth = _get_jenkins_auth()
 
