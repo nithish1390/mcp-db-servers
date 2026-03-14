@@ -47,6 +47,8 @@ All servers are configured in `.vscode/mcp.json` for use with VS Code MCP client
 ### Excel Server
 - **Tools**:
   - `create_excel_file`: Create Excel files from CSV data
+  - `create_excel`: Create dynamic Excel files with multiple sheets and flexible data formats
+  - `update_excel`: Update existing Excel files with new data (cells, ranges, append rows/columns)
   - `create_chart`: Create charts (bar, line, pie, scatter)
   - `create_pivot_table`: Create pivot tables with aggregation
   - `analyze_data`: Perform data analysis (summary, correlation, distribution)

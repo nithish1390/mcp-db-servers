@@ -292,6 +292,165 @@ def format_excel_file(filepath: str, formatting: str, ctx: Context) -> str:
         return f"Error applying formatting: {e}"
 
 
+@mcp.tool()
+def create_excel(ctx: Context, filename: str, sheets_data: str, sheet_names: str = "Sheet1") -> str:
+    """Create a dynamic Excel file with multiple sheets and various data formats.
+
+    Args:
+        filename: Name of the Excel file to create
+        sheets_data: JSON-like string with sheet data. Format: {"sheet1": [["row1col1", "row1col2"], ["row2col1", "row2col2"]], "sheet2": [["data"]]}
+        sheet_names: Comma-separated list of sheet names (optional, will use Sheet1, Sheet2, etc. if not provided)
+
+    Returns:
+        Success message with file path
+    """
+    try:
+        import json
+        import ast
+
+        # Parse sheets_data - try JSON first, then literal eval
+        try:
+            data_dict = json.loads(sheets_data)
+        except json.JSONDecodeError:
+            try:
+                data_dict = ast.literal_eval(sheets_data)
+            except:
+                return "Error: Invalid data format. Please provide data as a valid dictionary string."
+
+        # Parse sheet names
+        names = [name.strip() for name in sheet_names.split(',')] if sheet_names else []
+
+        # Create workbook
+        workbook = openpyxl.Workbook()
+
+        # Remove default sheet
+        workbook.remove(workbook.active)
+
+        # Create sheets and populate data
+        for i, (sheet_key, sheet_data) in enumerate(data_dict.items()):
+            sheet_name = names[i] if i < len(names) else f"Sheet{i+1}"
+            sheet = workbook.create_sheet(sheet_name)
+
+            if isinstance(sheet_data, list):
+                for row_idx, row in enumerate(sheet_data, 1):
+                    if isinstance(row, list):
+                        for col_idx, cell_value in enumerate(row, 1):
+                            sheet.cell(row=row_idx, column=col_idx, value=cell_value)
+                    else:
+                        # Single value in row
+                        sheet.cell(row=row_idx, column=1, value=row)
+            else:
+                # Single value
+                sheet.cell(row=1, column=1, value=sheet_data)
+
+        # Save file
+        temp_dir = ctx.request_context.lifespan_context.temp_dir
+        filepath = os.path.join(temp_dir, f"{filename}.xlsx")
+        workbook.save(filepath)
+
+        return f"Dynamic Excel file created successfully: {filepath}"
+    except Exception as e:
+        return f"Error creating dynamic Excel file: {e}"
+
+
+@mcp.tool()
+def update_excel(ctx: Context, filepath: str, updates: str) -> str:
+    """Update an existing Excel file with new data.
+
+    Args:
+        filepath: Path to the existing Excel file
+        updates: JSON-like string with update operations. Format: [{"sheet": "Sheet1", "cell": "A1", "value": "new_value"}, {"sheet": "Sheet1", "range": "B2:C3", "data": [["val1", "val2"], ["val3", "val4"]]}]
+
+    Returns:
+        Success message
+    """
+    try:
+        import json
+        import ast
+        from openpyxl.utils import column_index_from_string, get_column_letter
+
+        # Parse updates - try JSON first, then literal eval
+        try:
+            update_list = json.loads(updates)
+        except json.JSONDecodeError:
+            try:
+                update_list = ast.literal_eval(updates)
+            except:
+                return "Error: Invalid updates format. Please provide updates as a valid list of dictionaries."
+
+        # Load workbook
+        if not os.path.exists(filepath):
+            return f"Error: File {filepath} does not exist"
+
+        workbook = openpyxl.load_workbook(filepath)
+
+        for update in update_list:
+            sheet_name = update.get('sheet', 'Sheet1')
+
+            # Get or create sheet
+            if sheet_name in workbook.sheetnames:
+                sheet = workbook[sheet_name]
+            else:
+                sheet = workbook.create_sheet(sheet_name)
+
+            if 'cell' in update and 'value' in update:
+                # Update single cell
+                cell_ref = update['cell']
+                value = update['value']
+                sheet[cell_ref] = value
+
+            elif 'range' in update and 'data' in update:
+                # Update range of cells
+                range_ref = update['range']
+                data = update['data']
+
+                # Parse range (e.g., "A1:B2")
+                start_cell, end_cell = range_ref.split(':')
+                start_col = column_index_from_string(start_cell[0])
+                start_row = int(start_cell[1:])
+                end_col = column_index_from_string(end_cell[0])
+                end_row = int(end_cell[1:])
+
+                # Fill data
+                for row_idx, row_data in enumerate(data):
+                    if isinstance(row_data, list):
+                        for col_idx, cell_value in enumerate(row_data):
+                            if start_row + row_idx <= end_row and start_col + col_idx <= end_col:
+                                sheet.cell(row=start_row + row_idx, column=start_col + col_idx, value=cell_value)
+                    else:
+                        # Single value in row
+                        if start_row + row_idx <= end_row:
+                            sheet.cell(row=start_row + row_idx, column=start_col, value=row_data)
+
+            elif 'append_row' in update and 'data' in update:
+                # Append row to sheet
+                data = update['data']
+                next_row = sheet.max_row + 1
+
+                if isinstance(data, list):
+                    for col_idx, cell_value in enumerate(data, 1):
+                        sheet.cell(row=next_row, column=col_idx, value=cell_value)
+                else:
+                    sheet.cell(row=next_row, column=1, value=data)
+
+            elif 'append_column' in update and 'data' in update:
+                # Append column to sheet
+                data = update['data']
+                next_col = sheet.max_column + 1
+
+                if isinstance(data, list):
+                    for row_idx, cell_value in enumerate(data, 1):
+                        sheet.cell(row=row_idx, column=next_col, value=cell_value)
+                else:
+                    sheet.cell(row=1, column=next_col, value=data)
+
+        # Save updated file
+        workbook.save(filepath)
+        return f"Excel file updated successfully: {filepath}"
+    except Exception as e:
+        return f"Error updating Excel file: {e}"
+
+
 @mcp.resource("excel://help")
 def get_excel_help() -> str:
     """Get help information for Excel operations."""
@@ -300,6 +459,8 @@ Excel Operations Available:
 
 Tools:
 - create_excel_file: Create Excel file from CSV data
+- create_excel: Create dynamic Excel file with multiple sheets and flexible data
+- update_excel: Update existing Excel files with new data
 - create_chart: Create charts (bar, line, pie, scatter)
 - create_pivot_table: Create pivot tables with aggregation
 - analyze_data: Perform data analysis (summary, correlation, distribution)
@@ -308,6 +469,15 @@ Tools:
 Chart Types: bar, line, pie, scatter
 Analysis Types: summary, correlation, distribution
 Formatting Options: header_bold, alternate_rows, borders
+
+create_excel Data Format:
+{"Sheet1": [["Name", "Age"], ["Alice", 30], ["Bob", 25]], "Sheet2": [["Data"]]}
+
+update_excel Operations Format:
+[{"sheet": "Sheet1", "cell": "A1", "value": "New Value"},
+ {"sheet": "Sheet1", "range": "B2:C3", "data": [["val1", "val2"], ["val3", "val4"]]},
+ {"sheet": "Sheet1", "append_row": true, "data": ["New", "Row", "Data"]},
+ {"sheet": "Sheet1", "append_column": true, "data": ["New", "Column", "Data"]}]
 
 Example CSV Data Format:
 Name,Age,Salary
