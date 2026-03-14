@@ -14,6 +14,11 @@
       "type": "stdio",
       "command": "/usr/local/bin/python3",
       "args": ["excel.py"]
+    },
+    "jenkins-server": {
+      "type": "stdio",
+      "command": "/usr/local/bin/python3",
+      "args": ["jenkins.py"]
     }
   }
 }
