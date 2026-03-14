@@ -5,10 +5,10 @@
       "command": "/usr/local/bin/python3",
       "args": ["server.py"]
     },
-    "java-db-server": {
+    "oracle-db-server": {
       "type": "stdio",
-      "command": "java",
-      "args": ["-cp", "/Users/nithish/project/ai1/java-db-server/target/classes", "com.example.McpDbServer"]
+      "command": "/usr/local/bin/python3",
+      "args": ["server_oracle.py"]
     }
   }
 }
