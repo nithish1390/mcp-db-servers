@@ -9,6 +9,11 @@
       "type": "stdio",
       "command": "/usr/local/bin/python3",
       "args": ["server_oracle.py"]
+    },
+    "excel-server": {
+      "type": "stdio",
+      "command": "/usr/local/bin/python3",
+      "args": ["excel.py"]
     }
   }
 }

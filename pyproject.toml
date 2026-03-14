@@ -1,10 +1,14 @@
 [project]
 name = "mcp-db-server"
 version = "0.1.0"
-description = "MCP server for database operations"
+description = "MCP server for database operations and Excel analysis"
 dependencies = [
     "mcp[cli]",
-    "cx-Oracle"
+    "cx-Oracle",
+    "pandas",
+    "openpyxl",
+    "matplotlib",
+    "seaborn"
 ]
 
 [build-system]

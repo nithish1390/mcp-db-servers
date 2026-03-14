@@ -1,6 +1,6 @@
-# MCP Database Servers
+# MCP Database and Excel Servers
 
-This workspace contains three MCP database servers:
+This workspace contains MCP servers for database operations and Excel analysis:
 
 ## Python MCP Server (SQLite)
 
@@ -16,6 +16,12 @@ This workspace contains three MCP database servers:
 - Features: Query and execute SQL operations on Oracle database
 - Command: `python server_oracle.py`
 
+## Python MCP Server (Excel Operations)
+
+- Location: `excel.py`
+- Features: Excel file creation, charts, pivot tables, and data analysis
+- Command: `python excel.py`
+
 ## Java MCP Server (Oracle/H2)
 
 - Location: `java-db-server/`
@@ -30,6 +36,7 @@ All servers are configured in `.vscode/mcp.json` for use with VS Code MCP client
 
 ## Server Features
 
+### Database Servers
 - **Tools**:
   - `query_db`: Execute SELECT queries
   - `execute_db`: Execute modification queries
@@ -37,20 +44,22 @@ All servers are configured in `.vscode/mcp.json` for use with VS Code MCP client
 - **Resources**:
   - `db://schema`: Database schema information
 
+### Excel Server
+- **Tools**:
+  - `create_excel_file`: Create Excel files from CSV data
+  - `create_chart`: Create charts (bar, line, pie, scatter)
+  - `create_pivot_table`: Create pivot tables with aggregation
+  - `analyze_data`: Perform data analysis (summary, correlation, distribution)
+  - `format_excel_file`: Apply formatting to Excel files
+
+- **Resources**:
+  - `excel://help`: Help information for Excel operations
+
 ## Setup
 
-1. For Python servers: `pip install "mcp[cli]" cx-Oracle`
+1. For Python servers: `pip install "mcp[cli]" cx-Oracle pandas openpyxl matplotlib seaborn`
 2. For Java server: `cd java-db-server && mvn clean compile`
 
 ## Usage
 
 Run any server and connect via MCP-compatible clients like Claude Desktop or VS Code extensions.
-
-## Tools
-
-- `query_db`: Execute SELECT queries
-- `execute_db`: Execute modification queries
-
-## Resources
-
-- `db://schema`: Database schema information
