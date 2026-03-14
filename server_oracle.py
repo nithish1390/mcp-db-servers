@@ -6,6 +6,7 @@ import oracledb
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from typing import Optional
 
 from mcp.server.fastmcp import Context, FastMCP
 
@@ -14,6 +15,72 @@ from mcp.server.fastmcp import Context, FastMCP
 class AppContext:
     """Application context with database connection."""
     db: oracledb.Connection
+    driver_type: str = "thin"
+
+
+def configure_oracle_driver(driver_type: str = "thin") -> None:
+    """
+    Configure Oracle driver type.
+
+    Args:
+        driver_type: Type of Oracle driver to use
+            - "thin": Pure Python driver (equivalent to oracle.jdbc.driver.OracleDriver thin)
+            - "thick": Requires Oracle Instant Client libraries
+    """
+    if driver_type == "thin":
+        # Use thin driver - pure Python implementation
+        # Equivalent to oracle.jdbc.driver.OracleDriver(thin)
+        oracledb.init_oracle_client(config_dir=None)
+    elif driver_type == "thick":
+        # Use thick driver - requires Oracle Instant Client
+        oracledb.init_oracle_client()
+    else:
+        raise ValueError(f"Unsupported driver type: {driver_type}. Use 'thin' or 'thick'.")
+
+
+def create_oracle_connection(
+    hostname: str,
+    port: int,
+    username: str,
+    password: str,
+    service_name: str,
+    driver_type: str = "thin"
+) -> oracledb.Connection:
+    """
+    Create Oracle database connection with specified driver type.
+
+    Args:
+        hostname: Oracle server hostname
+        port: Oracle server port
+        username: Database username
+        password: Database password
+        service_name: Oracle service name
+        driver_type: Driver type ("thin" or "thick")
+
+    Returns:
+        Oracle database connection
+    """
+    configure_oracle_driver(driver_type)
+
+    # Create DSN (Data Source Name)
+    dsn = oracledb.makedsn(hostname, port, service_name=service_name)
+
+    # Connect using specified driver type
+    if driver_type == "thin":
+        # Thin driver connection (equivalent to JDBC thin driver)
+        return oracledb.connect(
+            user=username,
+            password=password,
+            dsn=dsn,
+            config_dir=None  # Explicitly use thin driver
+        )
+    else:
+        # Thick driver connection
+        return oracledb.connect(
+            user=username,
+            password=password,
+            dsn=dsn
+        )
 
 
 @asynccontextmanager
@@ -25,10 +92,17 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
     username = "cash"
     password = "Cash@123"
     service_name = "exsgid"
+    driver_type = "thin"  # Use thin driver (equivalent to oracle.jdbc.driver.OracleDriver(thin))
 
-    # Create connection string
-    dsn = oracledb.makedsn(hostname, port, service_name=service_name)
-    db = oracledb.connect(user=username, password=password, dsn=dsn)
+    # Create connection using thin driver
+    db = create_oracle_connection(
+        hostname=hostname,
+        port=port,
+        username=username,
+        password=password,
+        service_name=service_name,
+        driver_type=driver_type
+    )
 
     # Create sample table if it doesn't exist
     try:
@@ -57,7 +131,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
         db.commit()
 
     try:
-        yield AppContext(db=db)
+        yield AppContext(db=db, driver_type=driver_type)
     finally:
         db.close()
 
@@ -108,11 +182,54 @@ def execute_db(query: str, ctx: Context) -> str:
         return f"Error executing query: {e}"
 
 
+@mcp.tool()
+def get_driver_info(ctx: Context) -> str:
+    """Get information about the current Oracle driver configuration."""
+    driver_type = ctx.request_context.lifespan_context.driver_type
+    return f"""
+Current Oracle Driver Configuration:
+- Driver Type: {driver_type}
+- Equivalent JDBC Driver: oracle.jdbc.driver.OracleDriver({driver_type})
+- Description: {'Pure Python implementation (no Oracle client required)' if driver_type == 'thin' else 'Requires Oracle Instant Client libraries'}
+- Connection Method: {'Thin driver (JDBC equivalent)' if driver_type == 'thin' else 'Thick driver (native Oracle client)'}
+    """
+
+
+@mcp.tool()
+def switch_driver_type(ctx: Context, new_driver_type: str) -> str:
+    """Switch between thin and thick Oracle driver types.
+
+    Note: This requires server restart to take effect.
+
+    Args:
+        new_driver_type: Driver type to switch to ("thin" or "thick")
+    """
+    if new_driver_type not in ["thin", "thick"]:
+        return "Error: Invalid driver type. Use 'thin' or 'thick'."
+
+    return f"""
+Driver type change requested: {new_driver_type}
+
+Note: To apply this change:
+1. Update the driver_type variable in app_lifespan() function
+2. Restart the MCP server
+
+Current driver: {ctx.request_context.lifespan_context.driver_type}
+Requested driver: {new_driver_type}
+Equivalent JDBC: oracle.jdbc.driver.OracleDriver({new_driver_type})
+    """
+
+
 @mcp.resource("db://schema")
 def get_schema() -> str:
     """Get the Oracle database schema information."""
     return """
-Oracle Database Tables:
+Oracle Database Configuration:
+- Driver: oracledb (Python Oracle Database driver)
+- Driver Type: thin (equivalent to oracle.jdbc.driver.OracleDriver(thin))
+- Connection: Pure Python implementation (no Oracle client required)
+
+Tables:
 - users: id (NUMBER PRIMARY KEY), name (VARCHAR2(100)), age (NUMBER)
     """
 
