@@ -2,7 +2,7 @@
 MCP server for database operations using Oracle DB.
 """
 
-import cx_Oracle
+import oracledb
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -13,7 +13,7 @@ from mcp.server.fastmcp import Context, FastMCP
 @dataclass
 class AppContext:
     """Application context with database connection."""
-    db: cx_Oracle.Connection
+    db: oracledb.Connection
 
 
 @asynccontextmanager
@@ -27,8 +27,8 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
     service_name = "exsgid"
 
     # Create connection string
-    dsn = cx_Oracle.makedsn(hostname, port, service_name=service_name)
-    db = cx_Oracle.connect(user=username, password=password, dsn=dsn)
+    dsn = oracledb.makedsn(hostname, port, service_name=service_name)
+    db = oracledb.connect(user=username, password=password, dsn=dsn)
 
     # Create sample table if it doesn't exist
     try:
@@ -41,7 +41,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
             )
         """)
         db.commit()
-    except cx_Oracle.DatabaseError as e:
+    except oracledb.DatabaseError as e:
         # Table might already exist, continue
         if "ORA-00955" not in str(e):  # ORA-00955 is "name is already used by an existing object"
             raise
