@@ -1,184 +1,136 @@
-const express = require('express');
-const multer = require('multer');
-const mq = require('ibmmq');
 const fs = require('fs');
+const mq = require('ibmmq');
+const readline = require('readline');
 
-const app = express();
-const upload = multer({ dest: 'uploads/' });
-
-// MQ Constants
 const MQC = mq.MQC;
 
-// MQ Config
+// MQ Config (can also use env variables)
 const MQ_CONFIG = {
-    queueManager: "QM1",
-    channel: "DEV.APP.SVRCONN",
-    connName: "localhost(1414)",
-    user: "app",
-    password: "password"
+  queueManager: process.env.MQ_QMGR || "QM1",
+  channel: process.env.MQ_CHANNEL || "DEV.APP.SVRCONN",
+  connName: process.env.MQ_HOST ? `${process.env.MQ_HOST}(${process.env.MQ_PORT || 1414})` : "localhost(1414)",
+  user: process.env.MQ_USER || "app",
+  password: process.env.MQ_PASSWORD || "password"
 };
 
 // File validation regex
 const FILE_PATTERN = /^[A-Za-z0-9._-]+@MQ\.(xml|txt)$/;
 
 // -------- VALIDATION FUNCTIONS --------
-
 function validateFilename(filename) {
-    if (!FILE_PATTERN.test(filename)) {
-        throw new Error("Invalid filename. Use QueueName@MQ.xml or QueueName@MQ.txt");
-    }
+  if (!FILE_PATTERN.test(filename)) throw new Error("Invalid filename. Use QueueName@MQ.xml or QueueName@MQ.txt");
 }
 
 function extractQueueName(filename) {
-    return filename.split("@MQ")[0];
+  return filename.split("@MQ")[0];
 }
 
 function validateProperties(source, destination, objectName) {
-    const errors = [];
-    const pattern = /^[A-Za-z0-9._-]+$/;
+  const errors = [];
+  const pattern = /^[A-Za-z0-9._-]+$/;
 
-    if (!source || source.length < 2) {
-        errors.push("Source must be at least 2 characters");
-    }
+  if (!source || source.length < 2) errors.push("Source must be at least 2 characters");
+  if (!destination || destination.length < 2) errors.push("Destination must be at least 2 characters");
+  if (!objectName || objectName.length < 2) errors.push("ObjectName must be at least 2 characters");
 
-    if (!destination || destination.length < 2) {
-        errors.push("Destination must be at least 2 characters");
-    }
+  [{name:"Source", value:source}, {name:"Destination", value:destination}, {name:"ObjectName", value:objectName}].forEach(f => {
+    if (f.value && !pattern.test(f.value)) errors.push(`${f.name} contains invalid characters`);
+  });
 
-    if (!objectName || objectName.length < 2) {
-        errors.push("ObjectName must be at least 2 characters");
-    }
-
-    [
-        { name: "Source", value: source },
-        { name: "Destination", value: destination },
-        { name: "ObjectName", value: objectName }
-    ].forEach(field => {
-        if (field.value && !pattern.test(field.value)) {
-            errors.push(`${field.name} contains invalid characters`);
-        }
-    });
-
-    if (errors.length > 0) {
-        throw new Error(errors.join(", "));
-    }
+  if (errors.length) throw new Error(errors.join(", "));
 }
 
 // -------- MQ CONNECTION --------
-
 function connectMQ() {
-    return new Promise((resolve, reject) => {
-        const cno = new mq.MQCNO();
-        const cd = new mq.MQCD();
-        const csp = new mq.MQCSP();
+  return new Promise((resolve, reject) => {
+    const cno = new mq.MQCNO();
+    const cd = new mq.MQCD();
+    const csp = new mq.MQCSP();
 
-        cd.ChannelName = MQ_CONFIG.channel;
-        cd.ConnectionName = MQ_CONFIG.connName;
-        cd.ChannelType = MQC.MQCHT_CLNTCONN;
-        cd.TransportType = MQC.MQXPT_TCP;
+    cd.ChannelName = MQ_CONFIG.channel;
+    cd.ConnectionName = MQ_CONFIG.connName;
+    cd.ChannelType = MQC.MQCHT_CLNTCONN;
+    cd.TransportType = MQC.MQXPT_TCP;
 
-        cno.ClientConn = cd;
+    cno.ClientConn = cd;
+    csp.UserId = MQ_CONFIG.user;
+    csp.Password = MQ_CONFIG.password;
+    cno.SecurityParms = csp;
 
-        csp.UserId = MQ_CONFIG.user;
-        csp.Password = MQ_CONFIG.password;
-        cno.SecurityParms = csp;
-
-        mq.Connx(MQ_CONFIG.queueManager, cno, (err, hConn) => {
-            if (err) return reject(err);
-            resolve(hConn);
-        });
+    mq.Connx(MQ_CONFIG.queueManager, cno, (err, hConn) => {
+      if (err) return reject(err);
+      resolve(hConn);
     });
+  });
 }
 
-// -------- ROUTE --------
+// -------- PROCESS REQUEST --------
+async function processRequest(input) {
+  let hConn;
+  try {
+    const { filePath, Source, Destination, ObjectName } = input;
 
-app.post('/upload', upload.single('file'), async (req, res) => {
-    let hConn;
+    if (!filePath) throw new Error("filePath is required");
+    if (!fs.existsSync(filePath)) throw new Error("File does not exist");
 
-    try {
-        // -------- FILE VALIDATION --------
-        if (!req.file) {
-            return res.status(400).json({ error: "File is required" });
-        }
+    const filename = filePath.split("/").pop();
 
-        const originalName = req.file.originalname;
+    validateFilename(filename);
+    const queueName = extractQueueName(filename);
+    validateProperties(Source, Destination, ObjectName);
 
-        validateFilename(originalName);
-        const queueName = extractQueueName(originalName);
+    const fileContent = fs.readFileSync(filePath);
+    if (!fileContent || fileContent.length === 0) throw new Error("File is empty");
 
-        // -------- PROPERTY VALIDATION --------
-        const { Source, Destination, ObjectName } = req.body;
+    hConn = await connectMQ();
 
-        validateProperties(Source, Destination, ObjectName);
+    const od = new mq.MQOD();
+    od.ObjectName = queueName;
+    od.ObjectType = MQC.MQOT_Q;
+    const openOptions = MQC.MQOO_OUTPUT;
 
-        // -------- READ FILE --------
-        const fileContent = fs.readFileSync(req.file.path);
+    return new Promise((resolve, reject) => {
+      mq.Open(hConn, od, openOptions, (err, hObj) => {
+        if (err) return reject(err);
 
-        if (!fileContent || fileContent.length === 0) {
-            throw new Error("File is empty");
-        }
+        const properties = { Source, Destination, ObjectName, FileName: filename };
+        const messageBuffer = Buffer.concat([Buffer.from(JSON.stringify(properties) + "\n"), fileContent]);
 
-        // -------- CONNECT MQ --------
-        hConn = await connectMQ();
+        const md = new mq.MQMD();
+        md.Format = MQC.MQFMT_STRING;
 
-        const od = new mq.MQOD();
-        od.ObjectName = queueName;
-        od.ObjectType = MQC.MQOT_Q;
+        const pmo = new mq.MQPMO();
 
-        const openOptions = MQC.MQOO_OUTPUT;
-
-        mq.Open(hConn, od, openOptions, (err, hObj) => {
-            if (err) throw err;
-
-            // -------- MESSAGE --------
-            const properties = {
-                Source,
-                Destination,
-                ObjectName,
-                FileName: originalName
-            };
-
-            const messageBuffer = Buffer.concat([
-                Buffer.from(JSON.stringify(properties) + "\n"),
-                fileContent
-            ]);
-
-            const md = new mq.MQMD();
-            md.Format = MQC.MQFMT_STRING;
-
-            const pmo = new mq.MQPMO();
-
-            mq.Put(hObj, md, pmo, messageBuffer, (err) => {
-                if (err) throw err;
-
-                mq.Close(hObj, 0, () => {
-                    mq.Disc(hConn, () => {});
-
-                    return res.status(200).json({
-                        status: "success",
-                        queue: queueName,
-                        properties
-                    });
-                });
-            });
+        mq.Put(hObj, md, pmo, messageBuffer, (err) => {
+          mq.Close(hObj, 0, () => {});
+          mq.Disc(hConn, () => {});
+          if (err) return reject(err);
+          resolve({ status: "success", queue: queueName, properties });
         });
+      });
+    });
 
-    } catch (err) {
-        if (hConn) mq.Disc(hConn, () => {});
+  } catch (err) {
+    if (hConn) mq.Disc(hConn, () => {});
+    return { status: "error", error: err.message };
+  }
+}
 
-        return res.status(400).json({
-            status: "error",
-            error: err.message
-        });
-    } finally {
-        // cleanup uploaded file
-        if (req.file) {
-            fs.unlink(req.file.path, () => {});
-        }
-    }
+// -------- STDIO HANDLER --------
+const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false });
+
+let inputBuffer = "";
+
+rl.on("line", (line) => {
+  inputBuffer += line;
 });
 
-// -------- START SERVER --------
-app.listen(5000, () => {
-    console.log("MCP Server running on port 5000");
+rl.on("close", async () => {
+  try {
+    const inputData = JSON.parse(inputBuffer);
+    const result = await processRequest(inputData);
+    process.stdout.write(JSON.stringify(result));
+  } catch (err) {
+    process.stdout.write(JSON.stringify({ status: "error", error: err.message }));
+  }
 });
