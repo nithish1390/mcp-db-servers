@@ -1,0 +1,22 @@
+{
+  "mcpServers": [
+    {
+      "name": "ibm-mq-file-uploader",
+      "type": "http",
+      "baseUrl": "http://localhost:5000",
+      "endpoints": {
+        "uploadFile": {
+          "path": "/upload",
+          "method": "POST",
+          "contentType": "multipart/form-data",
+          "fields": {
+            "file": "file",
+            "Source": "string",
+            "Destination": "string",
+            "ObjectName": "string"
+          }
+        }
+      }
+    }
+  ]
+}
