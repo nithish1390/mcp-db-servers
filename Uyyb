@@ -1,77 +1,26 @@
 from mcp.server.fastmcp import FastMCP
 import win32com.client
+import csv
+import os
 
-# Initialize MCP server
-mcp = FastMCP("Outlook Desktop MCP")
+mcp = FastMCP("Outlook Smart MCP")
 
+# ---------------------------
+# Outlook اتصال
+# ---------------------------
 def get_outlook():
     outlook = win32com.client.Dispatch("Outlook.Application")
     namespace = outlook.GetNamespace("MAPI")
     return outlook, namespace
 
 
-# ---- TOOL 1: Read Emails by Subject ----
+# ---------------------------
+# TOOL 1: Read Full Email by Subject
+# ---------------------------
 @mcp.tool()
-def read_emails_by_subject(subject_keyword: str, limit: int = 5) -> list:
+def read_email_full(subject_keyword: str) -> dict:
     """
-    Fetch emails from Inbox matching a subject keyword
-    """
-    outlook, namespace = get_outlook()
-    inbox = namespace.GetDefaultFolder(6)  # Inbox
-
-    messages = inbox.Items
-    messages.Sort("[ReceivedTime]", True)
-
-    results = []
-    count = 0
-
-    for message in messages:
-        try:
-            if subject_keyword.lower() in str(message.Subject).lower():
-                results.append({
-                    "subject": message.Subject,
-                    "sender": message.SenderName,
-                    "received": str(message.ReceivedTime),
-                    "entry_id": message.EntryID
-                })
-                count += 1
-
-                if count >= limit:
-                    break
-        except Exception:
-            continue
-
-    return results
-
-
-# ---- TOOL 2: Create Draft Reply ----
-@mcp.tool()
-def draft_reply(entry_id: str, reply_body: str) -> str:
-    """
-    Create a draft reply for a specific email (does NOT send)
-    """
-    outlook, namespace = get_outlook()
-
-    try:
-        mail_item = namespace.GetItemFromID(entry_id)
-        reply = mail_item.Reply()
-
-        # Append custom message to existing reply body
-        reply.Body = reply_body + "\n\n" + reply.Body
-
-        reply.Save()  # Save as draft
-
-        return "Draft reply created successfully"
-
-    except Exception as e:
-        return f"Error creating draft: {str(e)}"
-
-
-# ---- TOOL 3: (Optional) List Recent Emails ----
-@mcp.tool()
-def list_recent_emails(limit: int = 5) -> list:
-    """
-    Fetch latest emails from Inbox
+    Fetch full email (including body) by subject keyword
     """
     outlook, namespace = get_outlook()
     inbox = namespace.GetDefaultFolder(6)
@@ -79,27 +28,153 @@ def list_recent_emails(limit: int = 5) -> list:
     messages = inbox.Items
     messages.Sort("[ReceivedTime]", True)
 
-    emails = []
-    count = 0
-
     for message in messages:
         try:
-            emails.append({
-                "subject": message.Subject,
-                "sender": message.SenderName,
-                "received": str(message.ReceivedTime),
-                "entry_id": message.EntryID
-            })
-            count += 1
-
-            if count >= limit:
-                break
+            if subject_keyword.lower() in str(message.Subject).lower():
+                return {
+                    "subject": message.Subject,
+                    "sender": message.SenderName,
+                    "body": message.Body,
+                    "entry_id": message.EntryID
+                }
         except Exception:
             continue
 
-    return emails
+    return {"error": "No matching email found"}
 
 
-# ---- Run MCP Server ----
+# ---------------------------
+# TOOL 2: Intent Analyzer
+# ---------------------------
+@mcp.tool()
+def analyze_intent(email_body: str) -> str:
+    """
+    Basic rule-based intent detection
+    """
+    body = email_body.lower()
+
+    if "report" in body or "data" in body:
+        return "DATA_REQUEST"
+    elif "invoice" in body:
+        return "INVOICE_REQUEST"
+    elif "export" in body or "csv" in body:
+        return "EXPORT_REQUEST"
+    else:
+        return "GENERAL_REPLY"
+
+
+# ---------------------------
+# TOOL 3: Mock DB Query
+# ---------------------------
+@mcp.tool()
+def query_database(query_type: str) -> list:
+    """
+    Simulated DB query
+    """
+    if query_type == "DATA_REQUEST":
+        return [
+            {"name": "Alice", "sales": 1200},
+            {"name": "Bob", "sales": 900}
+        ]
+    elif query_type == "INVOICE_REQUEST":
+        return [
+            {"invoice_id": "INV001", "amount": 5000},
+            {"invoice_id": "INV002", "amount": 3000}
+        ]
+    return []
+
+
+# ---------------------------
+# TOOL 4: Export CSV
+# ---------------------------
+@mcp.tool()
+def export_to_csv(data: list, filename: str = "output.csv") -> str:
+    """
+    Export data to CSV
+    """
+    if not data:
+        return "No data to export"
+
+    keys = data[0].keys()
+    filepath = os.path.join(os.getcwd(), filename)
+
+    with open(filepath, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=keys)
+        writer.writeheader()
+        writer.writerows(data)
+
+    return filepath
+
+
+# ---------------------------
+# TOOL 5: Draft Smart Reply
+# ---------------------------
+@mcp.tool()
+def smart_draft_reply(subject_keyword: str) -> str:
+    """
+    End-to-end automation:
+    Read → Analyze → Act → Draft reply
+    """
+    outlook, namespace = get_outlook()
+
+    # Step 1: Read email
+    email = read_email_full(subject_keyword)
+    if "error" in email:
+        return email["error"]
+
+    body = email["body"]
+    entry_id = email["entry_id"]
+
+    # Step 2: Analyze intent
+    intent = analyze_intent(body)
+
+    response_text = ""
+
+    # Step 3: Take action based on intent
+    if intent in ["DATA_REQUEST", "INVOICE_REQUEST"]:
+        data = query_database(intent)
+        file_path = export_to_csv(data)
+
+        response_text = (
+            "Hi,\n\n"
+            "As requested, please find the data attached/generated.\n"
+            f"File created at: {file_path}\n\n"
+            "Let me know if you need anything else.\n"
+        )
+
+    elif intent == "EXPORT_REQUEST":
+        data = query_database("DATA_REQUEST")
+        file_path = export_to_csv(data)
+
+        response_text = (
+            "Hi,\n\n"
+            f"I've exported the requested data to CSV: {file_path}\n\n"
+            "Regards,\n"
+        )
+
+    else:
+        response_text = (
+            "Hi,\n\n"
+            "Thanks for your email. We will get back to you shortly.\n\n"
+            "Best regards,\n"
+        )
+
+    # Step 4: Create draft reply
+    try:
+        mail_item = namespace.GetItemFromID(entry_id)
+        reply = mail_item.Reply()
+
+        reply.Body = response_text + "\n\n" + reply.Body
+        reply.Save()
+
+        return f"Draft created with intent: {intent}"
+
+    except Exception as e:
+        return f"Error creating draft: {str(e)}"
+
+
+# ---------------------------
+# Run MCP Server
+# ---------------------------
 if __name__ == "__main__":
     mcp.run()
