@@ -1,0 +1,105 @@
+from mcp.server.fastmcp import FastMCP
+import win32com.client
+
+# Initialize MCP server
+mcp = FastMCP("Outlook Desktop MCP")
+
+def get_outlook():
+    outlook = win32com.client.Dispatch("Outlook.Application")
+    namespace = outlook.GetNamespace("MAPI")
+    return outlook, namespace
+
+
+# ---- TOOL 1: Read Emails by Subject ----
+@mcp.tool()
+def read_emails_by_subject(subject_keyword: str, limit: int = 5) -> list:
+    """
+    Fetch emails from Inbox matching a subject keyword
+    """
+    outlook, namespace = get_outlook()
+    inbox = namespace.GetDefaultFolder(6)  # Inbox
+
+    messages = inbox.Items
+    messages.Sort("[ReceivedTime]", True)
+
+    results = []
+    count = 0
+
+    for message in messages:
+        try:
+            if subject_keyword.lower() in str(message.Subject).lower():
+                results.append({
+                    "subject": message.Subject,
+                    "sender": message.SenderName,
+                    "received": str(message.ReceivedTime),
+                    "entry_id": message.EntryID
+                })
+                count += 1
+
+                if count >= limit:
+                    break
+        except Exception:
+            continue
+
+    return results
+
+
+# ---- TOOL 2: Create Draft Reply ----
+@mcp.tool()
+def draft_reply(entry_id: str, reply_body: str) -> str:
+    """
+    Create a draft reply for a specific email (does NOT send)
+    """
+    outlook, namespace = get_outlook()
+
+    try:
+        mail_item = namespace.GetItemFromID(entry_id)
+        reply = mail_item.Reply()
+
+        # Append custom message to existing reply body
+        reply.Body = reply_body + "\n\n" + reply.Body
+
+        reply.Save()  # Save as draft
+
+        return "Draft reply created successfully"
+
+    except Exception as e:
+        return f"Error creating draft: {str(e)}"
+
+
+# ---- TOOL 3: (Optional) List Recent Emails ----
+@mcp.tool()
+def list_recent_emails(limit: int = 5) -> list:
+    """
+    Fetch latest emails from Inbox
+    """
+    outlook, namespace = get_outlook()
+    inbox = namespace.GetDefaultFolder(6)
+
+    messages = inbox.Items
+    messages.Sort("[ReceivedTime]", True)
+
+    emails = []
+    count = 0
+
+    for message in messages:
+        try:
+            emails.append({
+                "subject": message.Subject,
+                "sender": message.SenderName,
+                "received": str(message.ReceivedTime),
+                "entry_id": message.EntryID
+            })
+            count += 1
+
+            if count >= limit:
+                break
+        except Exception:
+            continue
+
+    return emails
+
+
+# ---- Run MCP Server ----
+if __name__ == "__main__":
+    mcp.run()
