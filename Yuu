@@ -1,0 +1,161 @@
+import os
+import imapclient
+import pyzmail
+import smtplib
+from email.mime.text import MIMEText
+from dotenv import load_dotenv
+from mcp.server import FastMCP
+from openai import OpenAI
+
+# Load env
+load_dotenv()
+
+EMAIL = os.getenv("EMAIL")
+PASSWORD = os.getenv("PASSWORD")
+
+mcp = FastMCP("email-subject-agent")
+client = OpenAI()
+
+# -----------------------------------
+# 📥 TOOL: Read Emails by Subject
+# -----------------------------------
+@mcp.tool()
+def read_emails_by_subject(subject_filter: str, limit: int = 5):
+    """
+    Fetch unread emails matching a subject provided by MCP client
+    """
+
+    mail = imapclient.IMAPClient("outlook.office365.com", ssl=True)
+    mail.login(EMAIL, PASSWORD)
+    mail.select_folder("INBOX")
+
+    messages = mail.search(["UNSEEN"])
+    messages = messages[-limit:]
+
+    results = []
+
+    for uid in messages:
+        raw = mail.fetch([uid], ["BODY[]", "INTERNALDATE"])
+        msg = pyzmail.PyzMessage.factory(raw[uid][b"BODY[]"])
+
+        subject = msg.get_subject() or ""
+
+        # ✅ Match subject from MCP client
+        if subject_filter.lower() not in subject.lower():
+            continue
+
+        sender_name, sender_email = msg.get_addresses("from")[0]
+
+        body = ""
+        if msg.text_part:
+            body = msg.text_part.get_payload().decode(msg.text_part.charset)
+
+        received_time = str(raw[uid][b"INTERNALDATE"])
+
+        results.append({
+            "id": str(uid),
+            "subject": subject,
+            "from_name": sender_name,
+            "from_email": sender_email,
+            "received_time": received_time,
+            "body": body[:1000]
+        })
+
+    mail.logout()
+    return results
+
+
+# -----------------------------------
+# ✍️ TOOL: Generate Reply
+# -----------------------------------
+@mcp.tool()
+def generate_reply(email_data: dict):
+    """
+    Generate professional reply including metadata
+    """
+
+    prompt = f"""
+    Write a professional email reply.
+
+    Include:
+    - Sender name
+    - Mention received time
+    - Reference subject
+
+    Email Details:
+    From: {email_data['from_name']}
+    Time: {email_data['received_time']}
+    Subject: {email_data['subject']}
+    Body: {email_data['body']}
+
+    Keep it concise and professional.
+    """
+
+    response = client.chat.completions.create(
+        model="gpt-4.1",
+        messages=[{"role": "user", "content": prompt}]
+    )
+
+    return response.choices[0].message.content
+
+
+# -----------------------------------
+# 📤 TOOL: Send Email
+# -----------------------------------
+@mcp.tool()
+def send_email(to: str, subject: str, body: str):
+    """
+    Send reply email
+    """
+
+    msg = MIMEText(body)
+    msg["From"] = EMAIL
+    msg["To"] = to
+    msg["Subject"] = "Re: " + subject
+
+    with smtplib.SMTP("smtp.office365.com", 587) as server:
+        server.starttls()
+        server.login(EMAIL, PASSWORD)
+        server.send_message(msg)
+
+    return "sent"
+
+
+# -----------------------------------
+# 🤖 TOOL: Process Emails by Subject
+# -----------------------------------
+@mcp.tool()
+def process_by_subject(subject_filter: str):
+    """
+    End-to-end processing:
+    - Read emails by subject
+    - Generate reply
+    - Send reply
+    """
+
+    emails = read_emails_by_subject(subject_filter)
+
+    results = []
+
+    for email in emails:
+        reply = generate_reply(email)
+
+        send_email(
+            to=email["from_email"],
+            subject=email["subject"],
+            body=reply
+        )
+
+        results.append({
+            "subject": email["subject"],
+            "replied_to": email["from_email"]
+        })
+
+    return results
+
+
+# -----------------------------------
+# 🚀 Run Server
+# -----------------------------------
+if __name__ == "__main__":
+    mcp.run()
