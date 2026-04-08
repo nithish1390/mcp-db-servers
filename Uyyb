@@ -15,13 +15,24 @@ def get_outlook():
 
 
 # ---------------------------
-# TOOL 1: Read Full Email by Subject
+# Load DB Instructions
+# ---------------------------
+def load_db_instructions() -> str:
+    """
+    Reads instructions.md for schema + query guidance
+    """
+    try:
+        with open("instructions.md", "r", encoding="utf-8") as f:
+            return f.read()
+    except Exception as e:
+        return f"Error reading instructions: {str(e)}"
+
+
+# ---------------------------
+# TOOL 1: Read Email
 # ---------------------------
 @mcp.tool()
 def read_email_full(subject_keyword: str) -> dict:
-    """
-    Fetch full email (including body) by subject keyword
-    """
     outlook, namespace = get_outlook()
     inbox = namespace.GetDefaultFolder(6)
 
@@ -48,9 +59,6 @@ def read_email_full(subject_keyword: str) -> dict:
 # ---------------------------
 @mcp.tool()
 def analyze_intent(email_body: str) -> str:
-    """
-    Basic rule-based intent detection
-    """
     body = email_body.lower()
 
     if "report" in body or "data" in body:
@@ -64,24 +72,37 @@ def analyze_intent(email_body: str) -> str:
 
 
 # ---------------------------
-# TOOL 3: Mock DB Query
+# TOOL 3: Execute DB Query via MCP
 # ---------------------------
 @mcp.tool()
-def query_database(query_type: str) -> list:
+def execute_db_query(intent: str) -> list:
     """
-    Simulated DB query
+    Uses instructions.md + intent to build query
+    and calls external MCP DB tool
     """
-    if query_type == "DATA_REQUEST":
-        return [
-            {"name": "Alice", "sales": 1200},
-            {"name": "Bob", "sales": 900}
-        ]
-    elif query_type == "INVOICE_REQUEST":
-        return [
-            {"invoice_id": "INV001", "amount": 5000},
-            {"invoice_id": "INV002", "amount": 3000}
-        ]
-    return []
+
+    instructions = load_db_instructions()
+
+    # ---------------------------
+    # VERY SIMPLE RULE LOGIC (can be upgraded to LLM later)
+    # ---------------------------
+    if intent == "DATA_REQUEST":
+        query = "SELECT name, sales FROM sales_table LIMIT 10;"
+    elif intent == "INVOICE_REQUEST":
+        query = "SELECT invoice_id, amount FROM invoices LIMIT 10;"
+    else:
+        return []
+
+    # ---------------------------
+    # CALL EXTERNAL MCP TOOL
+    # ---------------------------
+    try:
+        # Replace 'db.run_sql' with your actual tool name
+        result = mcp.call_tool("db.run_sql", {"query": query})
+        return result
+
+    except Exception as e:
+        return [{"error": str(e)}]
 
 
 # ---------------------------
@@ -89,11 +110,8 @@ def query_database(query_type: str) -> list:
 # ---------------------------
 @mcp.tool()
 def export_to_csv(data: list, filename: str = "output.csv") -> str:
-    """
-    Export data to CSV
-    """
-    if not data:
-        return "No data to export"
+    if not data or "error" in str(data):
+        return "No valid data to export"
 
     keys = data[0].keys()
     filepath = os.path.join(os.getcwd(), filename)
@@ -107,14 +125,11 @@ def export_to_csv(data: list, filename: str = "output.csv") -> str:
 
 
 # ---------------------------
-# TOOL 5: Draft Smart Reply (WITH ATTACHMENT)
+# TOOL 5: Smart Draft Reply
 # ---------------------------
 @mcp.tool()
 def smart_draft_reply(subject_keyword: str) -> str:
-    """
-    End-to-end automation:
-    Read → Analyze → Act → Draft reply (with attachment)
-    """
+
     outlook, namespace = get_outlook()
 
     # Step 1: Read email
@@ -125,32 +140,31 @@ def smart_draft_reply(subject_keyword: str) -> str:
     body = email["body"]
     entry_id = email["entry_id"]
 
-    # Step 2: Analyze intent
+    # Step 2: Intent
     intent = analyze_intent(body)
 
     response_text = ""
-    attachment_path = None  # Track attachment
+    attachment_path = None
 
-    # Step 3: Take action based on intent
-    if intent in ["DATA_REQUEST", "INVOICE_REQUEST"]:
-        data = query_database(intent)
-        attachment_path = export_to_csv(data)
+    # Step 3: DB Query via MCP
+    if intent in ["DATA_REQUEST", "INVOICE_REQUEST", "EXPORT_REQUEST"]:
 
-        response_text = (
-            "Hi,\n\n"
-            "As requested, please find the data attached.\n\n"
-            "Let me know if you need anything else.\n"
-        )
+        data = execute_db_query(intent)
 
-    elif intent == "EXPORT_REQUEST":
-        data = query_database("DATA_REQUEST")
-        attachment_path = export_to_csv(data)
+        if data:
+            attachment_path = export_to_csv(data)
 
-        response_text = (
-            "Hi,\n\n"
-            "I've exported the requested data and attached it.\n\n"
-            "Regards,\n"
-        )
+            response_text = (
+                "Hi,\n\n"
+                "Please find the requested data attached.\n\n"
+                "Regards,\n"
+            )
+        else:
+            response_text = (
+                "Hi,\n\n"
+                "We couldn't find the requested data.\n\n"
+                "Regards,\n"
+            )
 
     else:
         response_text = (
@@ -159,21 +173,19 @@ def smart_draft_reply(subject_keyword: str) -> str:
             "Best regards,\n"
         )
 
-    # Step 4: Create draft reply
+    # Step 4: Draft reply
     try:
         mail_item = namespace.GetItemFromID(entry_id)
         reply = mail_item.Reply()
 
         reply.Body = response_text + "\n\n" + reply.Body
 
-        # Add attachment if exists
         if attachment_path and os.path.exists(attachment_path):
             reply.Attachments.Add(attachment_path)
 
-        # Save draft (or use reply.Display() to open it)
         reply.Save()
 
-        return f"Draft created with intent: {intent} (Attachment added if applicable)"
+        return f"Draft created with intent: {intent}"
 
     except Exception as e:
         return f"Error creating draft: {str(e)}"
