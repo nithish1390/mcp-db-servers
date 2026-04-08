@@ -6,7 +6,7 @@ import os
 mcp = FastMCP("Outlook Smart MCP")
 
 # ---------------------------
-# Outlook اتصال
+# Outlook Connection
 # ---------------------------
 def get_outlook():
     outlook = win32com.client.Dispatch("Outlook.Application")
@@ -107,13 +107,13 @@ def export_to_csv(data: list, filename: str = "output.csv") -> str:
 
 
 # ---------------------------
-# TOOL 5: Draft Smart Reply
+# TOOL 5: Draft Smart Reply (WITH ATTACHMENT)
 # ---------------------------
 @mcp.tool()
 def smart_draft_reply(subject_keyword: str) -> str:
     """
     End-to-end automation:
-    Read → Analyze → Act → Draft reply
+    Read → Analyze → Act → Draft reply (with attachment)
     """
     outlook, namespace = get_outlook()
 
@@ -129,26 +129,26 @@ def smart_draft_reply(subject_keyword: str) -> str:
     intent = analyze_intent(body)
 
     response_text = ""
+    attachment_path = None  # Track attachment
 
     # Step 3: Take action based on intent
     if intent in ["DATA_REQUEST", "INVOICE_REQUEST"]:
         data = query_database(intent)
-        file_path = export_to_csv(data)
+        attachment_path = export_to_csv(data)
 
         response_text = (
             "Hi,\n\n"
-            "As requested, please find the data attached/generated.\n"
-            f"File created at: {file_path}\n\n"
+            "As requested, please find the data attached.\n\n"
             "Let me know if you need anything else.\n"
         )
 
     elif intent == "EXPORT_REQUEST":
         data = query_database("DATA_REQUEST")
-        file_path = export_to_csv(data)
+        attachment_path = export_to_csv(data)
 
         response_text = (
             "Hi,\n\n"
-            f"I've exported the requested data to CSV: {file_path}\n\n"
+            "I've exported the requested data and attached it.\n\n"
             "Regards,\n"
         )
 
@@ -165,9 +165,15 @@ def smart_draft_reply(subject_keyword: str) -> str:
         reply = mail_item.Reply()
 
         reply.Body = response_text + "\n\n" + reply.Body
+
+        # Add attachment if exists
+        if attachment_path and os.path.exists(attachment_path):
+            reply.Attachments.Add(attachment_path)
+
+        # Save draft (or use reply.Display() to open it)
         reply.Save()
 
-        return f"Draft created with intent: {intent}"
+        return f"Draft created with intent: {intent} (Attachment added if applicable)"
 
     except Exception as e:
         return f"Error creating draft: {str(e)}"
