@@ -1,0 +1,84 @@
+from playwright.sync_api import sync_playwright
+
+# 👉 अपडेट this
+SERVICE_NOW_URL = "https://your-instance.service-now.com"
+
+# 👉 Edge executable path
+EDGE_PATH = r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"
+
+# 👉 Your Windows username path
+USER_DATA_DIR = r"C:\Users\YourUser\AppData\Local\Microsoft\Edge\User Data"
+
+def run():
+    with sync_playwright() as p:
+
+        # 🔥 Launch persistent Edge session (reuses login)
+        context = p.chromium.launch_persistent_context(
+            user_data_dir=USER_DATA_DIR,
+            executable_path=EDGE_PATH,
+            headless=False,
+            args=["--start-maximized"]
+        )
+
+        # Use existing tab or create new one
+        if context.pages:
+            page = context.pages[0]
+        else:
+            page = context.new_page()
+
+        # 1. Open ServiceNow
+        page.goto(SERVICE_NOW_URL)
+
+        print("\n👉 If not already logged in, complete PIN/SSO in browser...")
+        input("👉 Press ENTER once ServiceNow homepage is fully loaded...")
+
+        # 2. Navigate to Assigned to My Groups
+        target_url = f"{SERVICE_NOW_URL}/mywork/assigned_to_my_groups"
+        page.goto(target_url)
+
+        print("\n🔎 Navigating to CHG list...")
+
+        # 3. Handle iframe (classic UI)
+        try:
+            page.wait_for_selector("iframe[name='gsft_main']", timeout=10000)
+            frame = page.frame(name="gsft_main")
+            print("✅ Using classic UI frame")
+        except:
+            frame = page
+            print("✅ Using modern UI (no iframe)")
+
+        # 4. Wait for CHG elements
+        frame.wait_for_selector("a[href*='change_request.do']", timeout=20000)
+
+        # 5. Extract CHG numbers
+        chgs = frame.locator("a[href*='change_request.do']")
+        count = chgs.count()
+
+        print(f"\n✅ Found {count} CHG records:\n")
+
+        chg_list = []
+        for i in range(count):
+            chg_number = chgs.nth(i).inner_text()
+            chg_list.append(chg_number)
+            print(chg_number)
+
+        # 6. Save to file (optional)
+        with open("chg_list.txt", "w") as f:
+            for chg in chg_list:
+                f.write(chg + "\n")
+
+        print("\n📁 CHG list saved to chg_list.txt")
+
+        # 7. Screenshot (optional)
+        page.screenshot(path="servicenow_chg.png")
+
+        print("📸 Screenshot saved")
+
+        # Keep browser open (optional)
+        input("\n👉 Press ENTER to close browser...")
+
+        context.close()
+
+
+if __name__ == "__main__":
+    run()
