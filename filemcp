@@ -1,0 +1,101 @@
+from fastapi import FastAPI, UploadFile, File, Form, Header, HTTPException, Request
+from fastapi.responses import JSONResponse
+from pathlib import Path
+import aiofiles
+import os
+
+app = FastAPI(title="MCP File Upload Server")
+
+# ==============================
+# CONFIG
+# ==============================
+BASE_DIR = Path("storage").resolve()
+BASE_DIR.mkdir(parents=True, exist_ok=True)
+
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB limit
+API_KEYS = {"my-secure-api-key"}  # Replace with DB/Secrets Manager
+
+
+# ==============================
+# AUTH
+# ==============================
+def verify_api_key(api_key: str):
+    if api_key not in API_KEYS:
+        raise HTTPException(status_code=401, detail="Invalid API Key")
+
+
+# ==============================
+# SAFE PATH HANDLING
+# ==============================
+def get_safe_path(user_path: str) -> Path:
+    target = (BASE_DIR / user_path).resolve()
+
+    if not str(target).startswith(str(BASE_DIR)):
+        raise HTTPException(status_code=400, detail="Invalid path")
+
+    return target
+
+
+# ==============================
+# STREAMING SAVE FUNCTION
+# ==============================
+async def save_file_stream(file: UploadFile, destination: Path):
+    size = 0
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    async with aiofiles.open(destination, "wb") as out_file:
+        while True:
+            chunk = await file.read(1024 * 1024)  # 1MB chunks
+            if not chunk:
+                break
+
+            size += len(chunk)
+
+            if size > MAX_FILE_SIZE:
+                raise HTTPException(status_code=413, detail="File too large")
+
+            await out_file.write(chunk)
+
+    return size
+
+
+# ==============================
+# MCP ENDPOINT
+# ==============================
+@app.post("/mcp/upload")
+async def mcp_upload(
+    request: Request,
+    file: UploadFile = File(...),
+    filepath: str = Form(...),
+    x_api_key: str = Header(...)
+):
+    try:
+        # 1. Authenticate
+        verify_api_key(x_api_key)
+
+        # 2. Validate path
+        destination = get_safe_path(filepath)
+
+        # 3. Stream file to disk
+        file_size = await save_file_stream(file, destination)
+
+        return JSONResponse({
+            "status": "success",
+            "filename": file.filename,
+            "path": str(destination),
+            "size": file_size
+        })
+
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==============================
+# HEALTH CHECK (for agents)
+# ==============================
+@app.get("/mcp/health")
+async def health():
+    return {"status": "ok"}
